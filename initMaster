@@ -1,0 +1,103 @@
+#!/bin/bash
+
+#set the cluster username and password
+clusteruser=mpiuser
+pw=cluster
+clusterprefix=10.11.
+clusterip=${clusterprefix}12.
+clustergw=${clusterprefix}1.
+masterip=${clusterip}1
+currentdir=$(pwd)
+
+apt-get install openmpi-bin \
+	openssh-server \
+	nfs-kernel-server \
+	dialog \
+	nmap
+
+#get interface names
+netfacenames=$(ip link | awk '{print substr($2,1,length($2) -1 );getline}')
+
+netarray=($netfacenames)
+
+for word in $netfacenames
+do
+	echo $word
+done
+
+# Generate the dialog list of network interfaces
+counter=1
+radioentries=""
+for word in $netfacenames; do
+		radioentries="$radioentries $counter $word off "
+		let counter=counter+1
+done
+
+DIALOG=${DIALOG=dialog}
+tempfile=`tempfile 2>/dev/null` || tempfile=/tmp/test$$
+trap "rm -f $tempfile" 0 1 2 5 15
+
+dialog --title "SELECT NETWORK INTERFACE" --clear \
+				--output-fd 1 \
+        --radiolist "Select interface from list using space bar, then hit enter" 0 0 $counter \
+        $radioentries > $tempfile
+
+#set the choice of network interface
+choice=`cat $tempfile`
+netfacechoice=${netarray[choice-1]}
+
+#Set the cluster interface to the cluster IP. Master IP is 10.11.12.1 by default
+#I name the interface "cluster"
+#See if the interface is already set up
+clusteriface=$(nmcli con show | grep -c cluster)
+
+if [ "$clusteriface" -eq "0" ]; then
+	nmcli con add type ethernet con-name cluster ifname $netfacechoice ip4 ${masterip}/24 gw4 ${clustergw}1
+fi
+
+if [ "$clusteriface" -gt "1" ]; then
+	nmcli con delete cluster
+	nmcli con add type ethernet con-name cluster ifname $netfacechoice ip4 ${masterip}/24 gw4 ${clustergw}1
+fi
+
+#Add Master to the hosts file
+masterhostyes=$(grep -c $masterip /etc/hosts)
+if [ "$masterhostyes" -eq "0" ]; then
+	echo "$masterip master" | tee -a /etc/hosts
+	echo "Added node master at $masterip to /etc/hosts"
+fi
+
+userexist=$(awk -F: '{ print $1}' /etc/passwd | grep -c $clusteruser)
+
+if [ "$userexist" -eq "0" ]; then
+	adduser $clusteruser -disabled-password
+	echo -e "$pw\n$pw" | passwd mpiuser
+	usermod -aG sudo mpiuser
+	echo "User $clusteruser created"
+fi
+
+echo "Logging in as user $clusteruser"
+
+#sudo -u $clusteruser "whoami"
+#sudo -u $clusteruser "pwd"
+sudo -u $clusteruser "./initSSHKey"
+sudo -u $clusteruser "./initNFS"
+
+cloudshared=$(grep -c -w /home/$clusteruser/cloud /etc/exports)
+
+if [ "$cloudshared" -gt "0" ]; then
+  echo "The /home/$clusteruser/cloud folder already exists in /etc/exports"
+fi
+
+if [ "$cloudshared" -eq "0" ]; then
+  echo "Adding /home/$clusteruser/cloud to /etc/exports"
+  echo "/home/$clusteruser/cloud *(rw,sync,no_root_squash,no_subtree_check)" | tee -a /etc/exports
+fi
+
+echo "Exporting nfs file system"
+exportfs -a
+echo "Restarting nfs-kernel-server"
+service nfs-kernel-server restart
+
+
+echo "The node master at $masterip is set up. Connect computers via ethernet. Add a node by executing addnodeMaster on this computer, then addNodeNode on the node you wish to add."

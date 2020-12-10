@@ -1,0 +1,110 @@
+#!/bin/bash
+
+#Define variables
+clusteruser=mpiuser
+pw=cluster
+clusterprefix=10.11.
+clusterip=${clusterprefix}12.
+clustergw=${clusterprefix}1.
+masterip=${clusterip}1
+currentdir=$(pwd)
+
+#Install necessary packages
+apt-get install openmpi-bin \
+	openssh-server \
+	nfs-common \
+	dialog \
+	nmap
+
+masterexist=$(arp -a | grep -c $masterip)
+if [ $masterexist -ne 1]; then
+  echo "ERROR: Either the master node doesn't exist, or is somehow on the network more than once. Check your hosts file or look at the output of arp -a"
+  exit
+fi
+
+#Get the number of computers on the network
+nnodeexist=$(nmap ${clusterip}* | grep -c $clusterip)
+echo $nnodeexist
+nodenum=$(($nnodeexist+1))
+echo $nodenum
+
+nodeip=${clusterip}${nodenum}
+
+#get interface names
+netfacenames=$(ip link | awk '{print substr($2,1,length($2) -1 );getline}')
+  netarray=($netfacenames)
+
+  # Generate the dialog list of network interfaces
+counter=1
+radioentries=""
+  for word in $netfacenames; do
+  		radioentries="$radioentries $counter $word off "
+  		let counter=counter+1
+  done
+
+DIALOG=${DIALOG=dialog}
+tempfile=`tempfile 2>/dev/null` || tempfile=/tmp/test$$
+trap "rm -f $tempfile" 0 1 2 5 15
+
+dialog --title "SELECT NETWORK INTERFACE" --clear \
+				--output-fd 1 \
+        --radiolist "Select interface from list using space bar, then hit enter" 0 0 $counter \
+        $radioentries > $tempfile
+
+#set the choice of network interface
+choice=`cat $tempfile`
+netfacechoice=${netarray[choice-1]}
+
+clusteriface=$(nmcli con show | grep -c cluster)
+
+if [ "$clusteriface" -eq "0" ]; then
+	nmcli con add type ethernet con-name cluster ifname $netfacechoice ip4 ${nodeip}/24 gw4 ${clustergw}${nodenum}
+fi
+
+if [ "$clusteriface" -gt "1" ]; then
+	nmcli con delete cluster
+	nmcli con add type ethernet con-name cluster ifname $netfacechoice ip4 ${nodeip}/24 gw4 ${clustergw}${nodenum}
+fi
+
+masterhostyes=$(grep -c $masterip /etc/hosts)
+if [ "$masterhostyes" -eq "0" ]; then
+	echo "$masterip master" | tee -a /etc/hosts
+	echo "Added node master at $masterip to /etc/hosts"
+fi
+
+nodename=node${nnodeexist}
+nodehostyes=$(grep -c $nodeip /etc/hosts)
+
+if [ "$nodehostyes" -eq "0" ]; then
+  echo "$nodeip $nodename" | tee -a /etc/hosts
+  echo "Added node $nodename at $nodeip to /etc/hosts"
+fi
+
+userexist=$(awk -F: '{ print $1}' /etc/passwd | grep -c $clusteruser)
+
+if [ "$userexist" -eq "0" ]; then
+	adduser $clusteruser -disabled-password
+	echo -e "$pw\n$pw" | passwd mpiuser
+	usermod -aG sudo mpiuser
+	echo "User $clusteruser created"
+fi
+
+sudo -u $clusteruser "./initSSHKey"
+
+sudo -u $clusteruser ssh-copy-id master
+sudo -u $clusteruser eval `ssh-agent`
+sudo -u $clusteruser ssh-add ~/.ssh/id_rsa
+
+sudo -u $clusteruser "./initNFS"
+
+cloudshared=$(grep -c -w /home/$clusteruser/cloud /etc/fstab)
+
+if [ "$cloudshared" -gt "0" ]; then
+  echo "The /home/$clusteruser/cloud folder already exists in /etc/fstab"
+fi
+
+if [ "$cloudshared" -eq "0" ]; then
+	mount -t nfs master:/home/$clusteruser/cloud /home/$clusteruser/cloud
+  echo "Adding /home/$clusteruser/cloud to /etc/fstab"
+  echo "master:/home/$clusteruser/cloud /home/$clusteruser/cloud nfs" | sudo tee -a /etc/fstab
+fi

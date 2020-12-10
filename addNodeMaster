@@ -1,0 +1,31 @@
+#!/bin/bash
+
+#Define variables
+clusteruser=mpiuser
+pw=cluster
+clusterprefix=10.11.
+clusterip=${clusterprefix}12.
+clustergw=${clusterprefix}1.
+masterip=${clusterip}1
+currentdir=$(pwd)
+
+nnodeexist=$(arp -a | grep -c $clusterip)
+echo $nnodeexist
+nodenum=$(($nnodeexist+2))
+echo $nodenum
+
+nodeip=${clusterip}${nodenum}
+
+nodename=node${nodenum}
+nodehostyes=$(grep -c $nodeip /etc/hosts)
+
+if [ "$nodehostyes" -eq "0" ]; then
+  echo "$nodeip $nodename" | tee -a /etc/hosts
+  echo "Added node $nodename at $nodeip to /etc/hosts"
+fi
+
+#Copy SSH key to node
+eval `ssh-agent`
+ssh-add /home/${clusteruser}/.ssh/id_rsa
+
+sudo -u $clusteruser "ssh-copy-id $nodename"

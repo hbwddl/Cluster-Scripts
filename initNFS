@@ -1,0 +1,16 @@
+#!/bin/bash
+
+myname=$(whoami)
+
+echo "Logged in as user $myname"
+
+cloudexists=$(ls /home/$myname | grep -c -w cloud)
+
+if [ "$cloudexists" -gt "0" ]; then
+  echo "Directory /home/$myname/cloud already exists"
+fi
+
+if [ "$cloudexists" -eq "0" ]; then
+  echo "Creating cluster shared directory /home/$myname/cloud"
+  mkdir /home/$myname/cloud
+fi

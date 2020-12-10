@@ -1,0 +1,8 @@
+#!/bin/bash
+
+myname=$(whoami)
+
+echo "Logged in as user $myname"
+
+echo "Generating ssh key"
+ssh-keygen -t rsa -N ''
