@@ -1,0 +1,2 @@
+# Cluster-Scripts
+These are the scripts I used for setting up my MPI/Spark cluster. They are still a work in progress--you can't just run them and go, but for now they contain all the bash code that I used to set up the cluster. The order of running them should go like such: InitMaster (on master node), addNodeNode (on slave node), addNodeMaster (on master node), and then follow the instructions in "spark code" to set up spark.
