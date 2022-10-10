@@ -14,7 +14,8 @@ apt-get install openmpi-bin \
 	openssh-server \
 	nfs-common \
 	dialog \
-	nmap
+	nmap \
+	net-tools
 
 masterexist=$(arp -a | grep -c $masterip)
 if [ $masterexist -ne 1]; then
